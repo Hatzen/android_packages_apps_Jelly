@@ -22,6 +22,7 @@ import android.text.TextUtils
 import android.view.LayoutInflater
 import android.webkit.HttpAuthHandler
 import android.webkit.SslErrorHandler
+import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -59,8 +60,8 @@ internal class WebClient(
 
     override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
         super.onPageStarted(view, url, favicon)
-        urlBarLayout.onPageLoadStarted(url)
-        if (view.settings.javaScriptEnabled) {
+        urlBarLayout.onPageLoadStarted(UrlUtils.extractDisplayUrl(url))
+        if (view.settings.javaScriptEnabled && !UrlUtils.isFallbackPage(url)) {
             view.evaluateJavascript(scripts, null)
         }
     }
@@ -68,9 +69,31 @@ internal class WebClient(
     override fun onPageFinished(view: WebView, url: String) {
         super.onPageFinished(view, url)
         urlBarLayout.onPageLoadFinished(view.certificate)
-        if (view.settings.javaScriptEnabled) {
+        if (view.settings.javaScriptEnabled && !UrlUtils.isFallbackPage(url)) {
             view.evaluateJavascript(JsSyncUrl.SCRIPT, null)
             view.evaluateJavascript(JsManifest.SCRIPT, null)
+        }
+    }
+
+    override fun onReceivedError(
+        view: WebView,
+        request: WebResourceRequest,
+        error: WebResourceError
+    ) {
+        super.onReceivedError(view, request, error)
+        val failedUrl = request.url?.toString() ?: return
+        if (!request.isForMainFrame || UrlUtils.isFallbackPage(failedUrl)) {
+            return
+        }
+        val mode = if (UrlUtils.isLocalhostAllowed(failedUrl)) "offline" else "blocked"
+        val fallbackUrl = UrlUtils.buildLocalhostNoticeUrl(
+            mode,
+            failedUrl,
+            error.description?.toString(),
+        )
+        view.stopLoading()
+        view.post {
+            (view as WebViewExt).loadUrl(fallbackUrl)
         }
     }
 
@@ -83,6 +106,16 @@ internal class WebClient(
         if (request.isForMainFrame) {
             val webViewExt = view as WebViewExt
             val url = request.url.toString()
+            if (url.startsWith(UrlUtils.VAULTOS_KIWIX_ACTION_URL)) {
+                launchKiwixApp(view)
+                return true
+            }
+            if (!UrlUtils.isLocalhostAllowed(url)) {
+                view.post {
+                    webViewExt.loadUrl(UrlUtils.buildLocalhostNoticeUrl("blocked", url))
+                }
+                return true
+            }
             val needsLookup = (request.hasGesture()
                     || !TextUtils.equals(url, webViewExt.lastLoadedUrl))
             if (!webViewExt.isIncognito
@@ -97,6 +130,24 @@ internal class WebClient(
             }
         }
         return false
+    }
+
+    private fun launchKiwixApp(view: WebView) {
+        val context = view.context
+        val launchIntent = context.packageManager.getLaunchIntentForPackage(UrlUtils.KIWIX_PACKAGE_NAME)
+        if (launchIntent != null) {
+            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            try {
+                context.startActivity(launchIntent)
+                return
+            } catch (_: ActivityNotFoundException) {
+                // Fall through to snackbar below.
+            }
+        }
+        Snackbar.make(
+            view, context.getString(R.string.error_no_activity_found),
+            Snackbar.LENGTH_LONG
+        ).show()
     }
 
     override fun onReceivedHttpAuthRequest(

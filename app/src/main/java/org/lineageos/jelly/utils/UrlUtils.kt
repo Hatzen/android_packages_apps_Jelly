@@ -14,6 +14,16 @@ import java.util.Locale
 import java.util.regex.Pattern
 
 object UrlUtils {
+    const val DEFAULT_KIWIX_LOCALHOST_URL = "http://127.0.0.1:8080/"
+    const val VAULTOS_FALLBACK_URL = "file:///android_asset/vaultos_localhost.html"
+    const val VAULTOS_KIWIX_ACTION_URL = "vaultos://kiwix"
+    const val KIWIX_PACKAGE_NAME = "org.kiwix.kiwixmobile.standalone"
+
+    private val LOCALHOST_BARE_PATTERN: Pattern = Pattern.compile(
+        "^(?:localhost|127\\.0\\.0\\.1|\\[::1])(?::\\d+)?(?:/.*)?$",
+        Pattern.CASE_INSENSITIVE
+    )
+
     val ACCEPTED_URI_SCHEMA: Pattern = Pattern.compile(
         "(?i)" +  // switch on case insensitive matching
                 "(" +  // begin group for schema
@@ -49,9 +59,60 @@ object UrlUtils {
             }
             return inUrl
         }
-        return if (!hasSpace && Patterns.WEB_URL.matcher(inUrl).matches()) {
+        return if (LOCALHOST_BARE_PATTERN.matcher(inUrl).matches()) {
+            "http://$inUrl"
+        } else if (!hasSpace && Patterns.WEB_URL.matcher(inUrl).matches()) {
             URLUtil.guessUrl(inUrl)
         } else null
+    }
+
+    fun isFallbackPage(url: String?): Boolean =
+        url?.startsWith(VAULTOS_FALLBACK_URL) == true
+
+    fun extractDisplayUrl(url: String?): String? {
+        if (!isFallbackPage(url)) {
+            return url
+        }
+        val target = runCatching { Uri.parse(url).getQueryParameter("target") }.getOrNull()
+        return target?.takeIf { it.isNotBlank() } ?: DEFAULT_KIWIX_LOCALHOST_URL
+    }
+
+    fun isLocalhostAllowed(rawUrl: String): Boolean {
+        val trimmed = rawUrl.trim()
+        if (trimmed.isEmpty()) {
+            return true
+        }
+        val lower = trimmed.lowercase(Locale.ROOT)
+        if (lower.startsWith(VAULTOS_FALLBACK_URL) ||
+            lower.startsWith("file:///android_asset/") ||
+            lower == "about:blank" ||
+            lower.startsWith("data:") ||
+            lower.startsWith("javascript:") ||
+            lower.startsWith("content://")
+        ) {
+            return true
+        }
+        val uri = runCatching { Uri.parse(trimmed) }.getOrNull() ?: return false
+        val scheme = uri.scheme?.lowercase(Locale.ROOT) ?: return false
+        if (scheme != "http" && scheme != "https") {
+            return false
+        }
+        val host = uri.host?.lowercase(Locale.ROOT) ?: return false
+        return host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "[::1]"
+    }
+
+    fun buildLocalhostNoticeUrl(
+        mode: String,
+        target: String?,
+        reason: String? = null
+    ): String {
+        val builder = Uri.parse(VAULTOS_FALLBACK_URL).buildUpon()
+            .appendQueryParameter("mode", mode)
+            .appendQueryParameter("target", target.orEmpty())
+        if (!reason.isNullOrBlank()) {
+            builder.appendQueryParameter("reason", reason)
+        }
+        return builder.build().toString()
     }
 
     /**

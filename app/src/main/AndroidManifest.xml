@@ -27,6 +27,10 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"
         android:minSdkVersion="34" />
 
+    <queries>
+        <package android:name="org.kiwix.kiwixmobile.standalone" />
+    </queries>
+
     <application
         android:allowBackup="true"
         android:appCategory="productivity"

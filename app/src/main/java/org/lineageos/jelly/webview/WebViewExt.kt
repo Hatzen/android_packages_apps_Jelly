@@ -64,12 +64,15 @@ class WebViewExt @JvmOverloads constructor(
     }
 
     fun followUrl(url: String) {
-        UrlUtils.smartUrlFilter(url)?.let {
-            super.loadUrl(it, this.requestHeaders)
-            return
+        val candidate = UrlUtils.smartUrlFilter(url)
+            ?: UrlUtils.getFormattedUri(sharedPreferencesExt.searchEngine, url)
+        val targetUrl = if (UrlUtils.isLocalhostAllowed(candidate)) {
+            candidate
+        } else {
+            UrlUtils.buildLocalhostNoticeUrl("blocked", candidate)
         }
-        val templateUri = sharedPreferencesExt.searchEngine
-        super.loadUrl(UrlUtils.getFormattedUri(templateUri, url), this.requestHeaders)
+        lastLoadedUrl = targetUrl
+        super.loadUrl(targetUrl, this.requestHeaders)
     }
 
     private fun setup(urlBarLayout: UrlBarLayout) {
